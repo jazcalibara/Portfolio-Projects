@@ -1,6 +1,5 @@
 /* 
 Exploratory Analysis of Netflix Shows and Movies
-
 The objective of this exercise is to learn, clean and prepare the dataset in order to draw valuable insights.
 
 */
@@ -35,7 +34,7 @@ SELECT COUNT(CASE WHEN show_id IS NULL THEN 1 END) AS showid_nulls
     ,  COUNT(CASE WHEN type IS NULL THEN 1 END) AS type_nulls
     ,  COUNT(CASE WHEN title IS NULL THEN 1 END) AS title_nulls
     ,  COUNT(CASE WHEN director IS NULL THEN 1 END) AS director_nulls
-    ,  COUNT(CASE WHEN cast IS NULL THEN 1 END) AS movie_cast_nulls
+    ,  COUNT(CASE WHEN cast IS NULL THEN 1 END) AS cast_nulls
     ,  COUNT(CASE WHEN country IS NULL THEN 1 END) AS country_nulls
     ,  COUNT(CASE WHEN date_added IS NULL THEN 1 END) AS date_added_nulls
     ,  COUNT(CASE WHEN release_year IS NULL THEN 1 END) AS release_year_nulls
@@ -94,7 +93,13 @@ WHERE date_added IS NULL
 -- Checking the count of titles per release year
 
 SELECT release_year
-	, COUNT(title) AS title_count
+	, COUNT(show_id) AS count
+FROM Netflix..netflix_titles
+GROUP BY release_year
+ORDER BY release_year ASC
+
+SELECT release_year
+	, COUNT(*) AS count
 FROM Netflix..netflix_titles
 GROUP BY release_year
 ORDER BY release_year ASC
@@ -102,7 +107,7 @@ ORDER BY release_year ASC
 -- Finding the year with the highest release count
 
 SELECT TOP 1 release_year
-	, COUNT(title) AS title_count
+	, COUNT(show_id) AS count
 FROM Netflix..netflix_titles
 GROUP BY release_year
 ORDER BY COUNT(*) DESC
@@ -126,35 +131,65 @@ AS
 	FROM Netflix..netflix_titles
 	)
 SELECT top_billed_actor
-	, COUNT(title) AS titles_count
+	, COUNT(show_id) AS count
 FROM top_billing
 GROUP BY top_billed_actor
-ORDER BY titles_count DESC
+ORDER BY count DESC
 
 -- We want to have a table of all the titles in which country they are available. 
 -- Unlike the top billing position in the previous query where there is a hierarchy in the order of names, there is no such order in the country.
 
-SELECT *
-	, value as country_split
-FROM Netflix..netflix_titles
-OUTER APPLY STRING_SPLIT(REPLACE(country, ', ', ','),',')
-ORDER BY LEN(show_id), show_id ASC
+WITH countries_split
+AS
+	(
+	SELECT *
+	, value as countries_available
+	FROM Netflix..netflix_titles
+	OUTER APPLY STRING_SPLIT(REPLACE(country, ', ', ','),',')
+	--ORDER BY LEN(show_id), show_id ASC
+	)
+SELECT countries_available
+	, COUNT(show_id) AS count
+FROM countries_split
+GROUP BY countries_available 
+ORDER BY count DESC
 
 -- Similar to the previous query where there is no hierarchy in the order of names, we want to apply the same logic for directors.
 
-SELECT *
-	, value as director_split
-FROM Netflix..netflix_titles
-OUTER APPLY STRING_SPLIT(REPLACE(director, ', ', ','),',')
-ORDER BY LEN(show_id), show_id ASC
+WITH director_split
+AS
+	(
+	SELECT *
+		, value as director_names
+	FROM Netflix..netflix_titles
+	OUTER APPLY STRING_SPLIT(REPLACE(director, ', ', ','),',')
+	)
+SELECT director_names
+	, COUNT(show_id) AS count
+FROM director_split
+GROUP BY director_names 
+ORDER BY count DESC
 
 -- Apply the same equal weight for listed_in and rename to a more recognizable name like 'genres'.
 
-SELECT *
-	, value as genres
-FROM Netflix..netflix_titles
-OUTER APPLY STRING_SPLIT(REPLACE(listed_in, ', ', ','),',')
-ORDER BY LEN(show_id), show_id ASC
+WITH genres_split
+AS
+	(	
+	SELECT show_id
+		, type
+		, title
+		, date_added
+		, release_year
+		, rating
+		, value as genres
+	FROM Netflix..netflix_titles
+	OUTER APPLY STRING_SPLIT(REPLACE(listed_in, ', ', ','),',')
+	)
+SELECT genres
+	, COUNT(show_id) AS count
+FROM genres_split
+GROUP BY genres
+ORDER BY count DESC
 
 -- Count of title by actor
 -- Unlike the top_billing_actor, we want to assign equal weights on each cast value we extract.
@@ -174,10 +209,10 @@ AS
 	CROSS APPLY STRING_SPLIT(REPLACE(cast, ', ', ','),',')
 	)
 SELECT actor_name
-	, COUNT(title) AS title_count
+	, COUNT(show_id) AS count
 FROM cast_split
 GROUP BY actor_name
-ORDER BY title_count DESC
+ORDER BY count DESC
 
 -- Count of actors with most TV shows
 
@@ -191,10 +226,10 @@ AS
 	WHERE type = 'TV Show'
 	)
 SELECT actor_name
-	, COUNT(title) AS title_count
+	, COUNT(show_id) AS count
 FROM cast_split
 GROUP BY actor_name
-ORDER BY title_count DESC
+ORDER BY count DESC
 
 -- Count of actors with most movies
 
@@ -208,10 +243,10 @@ AS
 	WHERE type = 'Movie'
 	)
 SELECT actor_name
-	, COUNT(title) AS title_count
+	, COUNT(show_id) AS count
 FROM cast_split
 GROUP BY actor_name
-ORDER BY title_count DESC
+ORDER BY count DESC
 
 -- Count of TV shows vs movies per actor
 
@@ -229,3 +264,58 @@ SELECT actor_name
 FROM cast_split
 GROUP BY actor_name
 ORDER BY tv_show_count DESC
+
+-- Checking the count of titles per type per release year
+
+SELECT release_year
+	, COUNT(CASE WHEN type = 'TV Show' THEN 1 END) AS tv_show_count
+	, COUNT(CASE WHEN type = 'Movie' THEN 1 END) AS movie_count
+FROM Netflix..netflix_titles
+GROUP BY release_year
+ORDER BY release_year ASC
+
+-- Top billed actors by country
+
+WITH countries_split
+AS
+	(
+	SELECT *
+	, value as countries_available
+	, IIF(SUBSTRING(cast, 0, CHARINDEX(',', cast)) = '', cast, SUBSTRING(cast, 0, CHARINDEX(',', cast))) AS top_billed_actor
+	FROM Netflix..netflix_titles
+	OUTER APPLY STRING_SPLIT(REPLACE(country, ', ', ','),',')
+	)
+SELECT top_billed_actor
+	, countries_available
+	, COUNT(show_id) AS count
+FROM countries_split
+GROUP BY top_billed_actor
+	, countries_available 
+ORDER BY count DESC
+
+-- Count of Titles per Director per Genre
+
+WITH director_genres_split
+AS
+	(	
+	SELECT show_id
+		, type
+		, title
+		, date_added
+		, release_year
+		, rating
+		, genres.value as genres
+		, directors.value as directors
+	FROM Netflix..netflix_titles
+	OUTER APPLY STRING_SPLIT(REPLACE(listed_in, ', ', ','),',') AS genres
+	OUTER APPLY STRING_SPLIT(REPLACE(director, ', ', ','),',') AS directors
+	)
+SELECT type
+	, directors
+	, genres
+	, COUNT(show_id) AS count
+FROM director_genres_split
+GROUP BY type 
+	, directors
+	, genres
+ORDER BY directors ASC
